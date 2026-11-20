@@ -17,7 +17,7 @@ def read_input(upload, key):
     if upload is not None:
         df = load_excel(upload.getvalue())
     else:
-        candidates = sorted((Path(__file__).parent / 'data').glob('*.xlsx'))
+        candidates = sorted(Path(__file__).parent.glob('*.xlsx'))
         matches = [p for p in candidates if f'_{key.lower()}.xlsx' in p.name.lower()]
         if not matches:
             st.info(f'Para comenzar, carga el archivo original de {key} en el panel lateral.')
