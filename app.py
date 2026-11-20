@@ -1,30 +1,22 @@
 import os
-from pathlib import Path
 import pandas as pd
 import plotly.express as px
 import streamlit as st
 
 st.set_page_config(page_title='SF Crust Pizza | Inteligencia comercial', page_icon='🍕', layout='wide')
 st.markdown('''<style>.block-container{padding-top:1.5rem}.stMetric{background:#f7f9fc;padding:16px;border-radius:12px;border:1px solid #e6eaf0}h1{color:#182a42}</style>''', unsafe_allow_html=True)
-BASE = Path(__file__).parent / 'data'
 REQUIRED = {'ventas': ['VentaID','Fecha','Ciudad','Sucursal','ClienteID','ProductoID','Cantidad','VentaNeta','CostoTotal','UtilidadBruta'], 'clientes':['ClienteID','Segmento'], 'productos':['ProductoID','Producto','Categoria']}
 
-def default_path(key):
-    matches = list(BASE.glob(f'*_{key.capitalize()}.xlsx'))
-    return matches[0] if matches else None
-
-@st.cache_data(show_spinner='Cargando y relacionando las bases...')
-def load_excel(source):
-    return pd.read_excel(source, engine='openpyxl')
+@st.cache_data(show_spinner='Leyendo archivo Excel...')
+def load_excel(raw):
+    return pd.read_excel(raw, engine='openpyxl')
 
 def read_input(upload, key):
     if upload is not None:
         df = load_excel(upload.getvalue())
     else:
-        path = default_path(key)
-        if path is None:
-            st.error(f'Falta el archivo de {key}. Cárgalo en el panel lateral.'); st.stop()
-        df = load_excel(str(path))
+        st.info(f'Para comenzar, carga el archivo original de {key} en el panel lateral.')
+        st.stop()
     df.columns = df.columns.astype(str).str.strip()
     missing = set(REQUIRED[key]) - set(df.columns)
     if missing:
@@ -35,11 +27,13 @@ st.title('🍕 San Francisco Crust Pizza')
 st.caption('Sistema inteligente de apoyo a decisiones · Cuadro de mando comercial')
 with st.sidebar:
     st.header('📁 Actualizar bases')
+    st.info('Carga los tres archivos Excel originales. No se utilizan datos de ejemplo ni se guardan los archivos cargados en GitHub.')
     st.caption('Cargar un archivo reemplaza los datos de esa tabla en esta sesión. Los demás permanecen sin cambios.')
     u_ventas = st.file_uploader('Ventas (.xlsx)',type=['xlsx'],key='v')
     u_clientes = st.file_uploader('Clientes (.xlsx)',type=['xlsx'],key='c')
     u_productos = st.file_uploader('Productos (.xlsx)',type=['xlsx'],key='p')
 
+st.caption('Los resultados se calculan exclusivamente con los tres archivos Excel cargados.')
 ventas = read_input(u_ventas,'ventas')
 clientes = read_input(u_clientes,'clientes')
 productos = read_input(u_productos,'productos')
@@ -54,16 +48,21 @@ if clientes.ClienteID.duplicated().any() or productos.ProductoID.duplicated().an
 ventas['Fecha'] = pd.to_datetime(ventas['Fecha'],errors='coerce')
 for col in ['VentaNeta','CostoTotal','UtilidadBruta','Cantidad']:
     ventas[col] = pd.to_numeric(ventas[col],errors='coerce')
-ventas = ventas.dropna(subset=['Fecha','VentaNeta','CostoTotal','Cantidad'])
+invalid_rows = int(ventas[['Fecha','VentaNeta','CostoTotal','Cantidad']].isna().any(axis=1).sum())
+if invalid_rows:
+    st.error(f'Hay {invalid_rows:,} filas de ventas con fecha, importe, costo o cantidad inválidos. Corrige el archivo antes de continuar para evitar resultados incompletos.')
+    st.stop()
 # Recalcular la utilidad de las operaciones para asegurar consistencia contable.
 ventas['UtilidadCalculada'] = ventas['VentaNeta'] - ventas['CostoTotal']
 base = ventas.merge(clientes[['ClienteID','Segmento']],on='ClienteID',how='left',validate='many_to_one',indicator='_cliente_match')
 base = base.merge(productos[['ProductoID','Producto','Categoria'] + (['Tamaño'] if 'Tamaño' in productos.columns else [])],on='ProductoID',how='left',validate='many_to_one',indicator='_producto_match')
-base['Segmento'] = base['Segmento'].fillna('Sin clasificar')
-base['Producto'] = base['Producto'].fillna('Sin identificar')
+base['Segmento'] = base['Segmento'].fillna('Sin clasificar (sin coincidencia en Clientes)')
+base['Producto'] = base['Producto'].fillna('Sin identificar (sin coincidencia en Productos)')
 base['ProductoDetalle'] = base['Producto'].astype(str) + ((' · '+base['Tamaño'].fillna('').astype(str)) if 'Tamaño' in base else '')
 with st.sidebar:
     st.divider(); st.header('🎛️ Filtros')
+    if base.empty:
+        st.error('El archivo de ventas no contiene registros para analizar.'); st.stop()
     min_date,max_date = base.Fecha.min().date(),base.Fecha.max().date()
     date_range = st.date_input('Fecha (desde / hasta)',value=(min_date,max_date),min_value=min_date,max_value=max_date)
     ciudades = st.multiselect('Ciudad',sorted(base.Ciudad.dropna().unique()),placeholder='Todas')
@@ -126,7 +125,7 @@ with st.expander('📊 Tabla de detalle y descarga'):
     st.dataframe(detail,use_container_width=True,hide_index=True)
     st.download_button('Descargar ventas filtradas (CSV)',detail.to_csv(index=False).encode('utf-8-sig'),'ventas_filtradas.csv','text/csv')
 with st.expander('🔎 Calidad de datos'):
-    st.write(f'Registros originales de ventas: **{len(ventas):,}**. Registros tras filtros: **{len(df):,}**.')
+    st.write(f'Registros de ventas válidos: **{len(ventas):,}**. Registros tras filtros: **{len(df):,}**.')
     st.write(f'Ventas sin cliente relacionado: **{int((base._cliente_match=="left_only").sum()):,}**; sin producto relacionado: **{int((base._producto_match=="left_only").sum()):,}**.')
     dif=(ventas.UtilidadBruta-ventas.UtilidadCalculada).abs()
     st.write(f'Filas con discrepancia de utilidad superior a USD 0,02: **{int((dif>0.02).sum()):,}**. Se usa la utilidad recalculada.')
