@@ -212,17 +212,32 @@ with left:
     fig.update_layout(coloraxis_showscale=False)
     mostrar_grafico(fig)
 with right:
-    # Dispersión: relación entre facturación y rentabilidad por producto.
+    # Ranking horizontal: compara márgenes por producto sin mezclar USD y porcentajes en los ejes.
     rentabilidad = df.groupby('ProductoDetalle', as_index=False).agg(
         Ventas=('VentaNeta', 'sum'), Utilidad=('UtilidadCalculada', 'sum'),
         Unidades=('Cantidad', 'sum'))
-    rentabilidad['Margen (%)'] = rentabilidad.Utilidad / rentabilidad.Ventas.replace(0, float('nan')) * 100
-    fig = px.scatter(rentabilidad, x='Ventas', y='Margen (%)', size='Unidades',
-                     hover_name='ProductoDetalle', color='Margen (%)',
-                     color_continuous_scale='RdYlGn',
-                     title='Productos · ventas frente a margen bruto',
-                     labels={'Ventas': 'Ventas (USD)', 'Margen (%)': 'Margen bruto (%)'})
-    mostrar_grafico(fig)
+    rentabilidad = rentabilidad[rentabilidad['Ventas'] > 0].copy()
+    rentabilidad['Margen (%)'] = rentabilidad['Utilidad'] / rentabilidad['Ventas'] * 100
+    rentabilidad = rentabilidad.dropna(subset=['Margen (%)'])
+    # Se muestran los 12 productos con mayor facturación, ordenados por rentabilidad.
+    ranking = rentabilidad.nlargest(12, 'Ventas').sort_values('Margen (%)')
+    if ranking.empty:
+        st.info('No hay productos con ventas positivas para calcular el margen bruto.')
+    else:
+        fig = px.bar(
+            ranking, x='Margen (%)', y='ProductoDetalle', orientation='h',
+            color='Margen (%)', color_continuous_scale='Tealgrn',
+            text='Margen (%)', custom_data=['Ventas', 'Utilidad', 'Unidades'],
+            title='Margen bruto (%) · 12 productos de mayor venta',
+            labels={'Margen (%)': 'Margen bruto (%)', 'ProductoDetalle': 'Producto'}
+        )
+        fig.update_traces(
+            texttemplate='%{text:.1f}%', textposition='outside',
+            hovertemplate='<b>%{y}</b><br>Margen: %{x:.1f}%<br>Ventas: $%{customdata[0]:,.2f}<br>Utilidad: $%{customdata[1]:,.2f}<br>Unidades: %{customdata[2]:,.0f}<extra></extra>'
+        )
+        fig.update_layout(coloraxis_showscale=False, margin=dict(l=12, r=65, t=60, b=25))
+        mostrar_grafico(fig, 440)
+    st.caption('El ranking considera los 12 productos de mayor venta; el margen se calcula como utilidad bruta / ventas netas. Pasa el cursor para ver ventas y utilidad.')
 
 with st.expander('📊 Tabla de detalle y descarga'):
     detail=df[['VentaID','Fecha','Ciudad','Sucursal','ClienteID','Segmento','ProductoDetalle','Cantidad','VentaNeta','CostoTotal','UtilidadCalculada']].copy()
