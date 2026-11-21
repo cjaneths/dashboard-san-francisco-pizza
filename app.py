@@ -17,7 +17,7 @@ def read_input(upload, key):
     if upload is not None:
         df = load_excel(upload.getvalue())
     else:
-        candidates = sorted((Path(__file__).parent / 'data').glob('*.xlsx'))
+        candidates = sorted((Path(__file__).parent / 'data').glob('*.xlsx')) + sorted(Path(__file__).parent.glob('*.xlsx'))
         matches = [p for p in candidates if f'_{key.lower()}.xlsx' in p.name.lower()]
         if not matches:
             st.info(f'Para comenzar, carga el archivo original de {key} en la sección superior «Actualizar bases Excel».')
@@ -58,8 +58,9 @@ for col in ['VentaNeta','CostoTotal','UtilidadBruta','Cantidad']:
     ventas[col] = pd.to_numeric(ventas[col],errors='coerce')
 invalid_rows = int(ventas[['Fecha','VentaNeta','CostoTotal','Cantidad']].isna().any(axis=1).sum())
 if invalid_rows:
-    st.error(f'Hay {invalid_rows:,} filas de ventas con fecha, importe, costo o cantidad inválidos. Corrige el archivo antes de continuar para evitar resultados incompletos.')
-    st.stop()
+    st.warning(f'Se detectaron {invalid_rows:,} filas con datos esenciales inválidos. Se excluyen únicamente esas filas de los cálculos; el archivo original no se modifica.')
+    st.download_button('Descargar filas para revisión', data=ventas.loc[ventas[['Fecha','VentaNeta','CostoTotal','Cantidad']].isna().any(axis=1)].to_csv(index=False).encode('utf-8-sig'), file_name='filas_para_revision.csv', mime='text/csv')
+    ventas = ventas.loc[~ventas[['Fecha','VentaNeta','CostoTotal','Cantidad']].isna().any(axis=1)].copy()
 # Recalcular la utilidad de las operaciones para asegurar consistencia contable.
 ventas['UtilidadCalculada'] = ventas['VentaNeta'] - ventas['CostoTotal']
 base = ventas.merge(clientes[['ClienteID','Segmento']],on='ClienteID',how='left',validate='many_to_one',indicator='_cliente_match')
