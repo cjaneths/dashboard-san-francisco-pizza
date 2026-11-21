@@ -5,7 +5,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-st.set_page_config(page_title='SF Crust Pizza | Inteligencia comercial', page_icon='🍕', layout='wide')
+st.set_page_config(page_title='SF Crust Pizza | Inteligencia comercial', page_icon='🍕', layout='wide', initial_sidebar_state='collapsed')
 st.markdown('''<style>.block-container{padding-top:1.5rem}.stMetric{background:#f7f9fc;padding:16px;border-radius:12px;border:1px solid #e6eaf0}h1{color:#182a42}</style>''', unsafe_allow_html=True)
 REQUIRED = {'ventas': ['VentaID','Fecha','Ciudad','Sucursal','ClienteID','ProductoID','Cantidad','VentaNeta','CostoTotal','UtilidadBruta'], 'clientes':['ClienteID','Segmento'], 'productos':['ProductoID','Producto','Categoria']}
 
@@ -17,10 +17,10 @@ def read_input(upload, key):
     if upload is not None:
         df = load_excel(upload.getvalue())
     else:
-        candidates = sorted(Path(__file__).parent.glob('*.xlsx'))
+        candidates = sorted((Path(__file__).parent / 'data').glob('*.xlsx'))
         matches = [p for p in candidates if f'_{key.lower()}.xlsx' in p.name.lower()]
         if not matches:
-            st.info(f'Para comenzar, carga el archivo original de {key} en el panel lateral.')
+            st.info(f'Para comenzar, carga el archivo original de {key} en la sección superior «Actualizar bases Excel».')
             st.stop()
         df = load_excel(matches[0].read_bytes())
     df.columns = df.columns.astype(str).str.strip()
@@ -31,13 +31,15 @@ def read_input(upload, key):
 
 st.title('🍕 San Francisco Crust Pizza')
 st.caption('Sistema inteligente de apoyo a decisiones · Cuadro de mando comercial')
-with st.sidebar:
-    st.header('📁 Actualizar bases')
-    st.info('Datos exclusivamente de los Excel originales. Puedes sustituir cualquiera de las tres bases cargando un nuevo archivo.')
-    st.caption('Cargar un archivo reemplaza los datos de esa tabla en esta sesión. Los demás permanecen sin cambios.')
-    u_ventas = st.file_uploader('Ventas (.xlsx)',type=['xlsx'],key='v')
-    u_clientes = st.file_uploader('Clientes (.xlsx)',type=['xlsx'],key='c')
-    u_productos = st.file_uploader('Productos (.xlsx)',type=['xlsx'],key='p')
+with st.expander('📁 Actualizar bases Excel (cargar o reemplazar archivos)', expanded=True):
+    st.info('Utiliza exclusivamente tus tres Excel originales. Puedes reemplazar cada archivo sin modificar el código.')
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        u_ventas = st.file_uploader('Ventas (.xlsx)', type=['xlsx'], key='v')
+    with c2:
+        u_clientes = st.file_uploader('Clientes (.xlsx)', type=['xlsx'], key='c')
+    with c3:
+        u_productos = st.file_uploader('Productos (.xlsx)', type=['xlsx'], key='p')
 
 st.caption('Resultados calculados exclusivamente con las tres bases originales; no hay datos ficticios.')
 ventas = read_input(u_ventas,'ventas')
@@ -65,18 +67,26 @@ base = base.merge(productos[['ProductoID','Producto','Categoria'] + (['Tamaño']
 base['Segmento'] = base['Segmento'].fillna('Sin clasificar (sin coincidencia en Clientes)')
 base['Producto'] = base['Producto'].fillna('Sin identificar (sin coincidencia en Productos)')
 base['ProductoDetalle'] = base['Producto'].astype(str) + ((' · '+base['Tamaño'].fillna('').astype(str)) if 'Tamaño' in base else '')
-with st.sidebar:
-    st.divider(); st.header('🎛️ Filtros')
-    if base.empty:
-        st.error('El archivo de ventas no contiene registros para analizar.'); st.stop()
-    min_date,max_date = base.Fecha.min().date(),base.Fecha.max().date()
-    date_range = st.date_input('Fecha (desde / hasta)',value=(min_date,max_date),min_value=min_date,max_value=max_date)
-    ciudades = st.multiselect('Ciudad',sorted(base.Ciudad.dropna().unique()),placeholder='Todas')
-    suc_options = sorted(base.loc[base.Ciudad.isin(ciudades),'Sucursal'].dropna().unique()) if ciudades else sorted(base.Sucursal.dropna().unique())
-    sucursales = st.multiselect('Sucursal',suc_options,placeholder='Todas')
-    segmentos = st.multiselect('Segmento de cliente',sorted(base.Segmento.dropna().unique()),placeholder='Todos')
-    prods = st.multiselect('Producto',sorted(base.ProductoDetalle.dropna().unique()),placeholder='Todos')
-    st.caption('Deja un filtro sin seleccionar para incluir todos sus valores.')
+st.divider()
+st.subheader('🎛️ Mandos de control y filtros')
+if base.empty:
+    st.error('El archivo de ventas no contiene registros para analizar.')
+    st.stop()
+min_date, max_date = base.Fecha.min().date(), base.Fecha.max().date()
+col_fecha, col_ciudad, col_sucursal, col_segmento, col_producto = st.columns([1.35, 1, 1, 1.1, 1.35])
+with col_fecha:
+    date_range = st.date_input('Fecha (desde / hasta)', value=(min_date, max_date), min_value=min_date, max_value=max_date)
+with col_ciudad:
+    ciudades = st.multiselect('Ciudad', sorted(base.Ciudad.dropna().unique()), placeholder='Todas')
+with col_sucursal:
+    suc_options = sorted(base.loc[base.Ciudad.isin(ciudades), 'Sucursal'].dropna().unique()) if ciudades else sorted(base.Sucursal.dropna().unique())
+    sucursales = st.multiselect('Sucursal', suc_options, placeholder='Todas')
+with col_segmento:
+    segmentos = st.multiselect('Segmento de cliente', sorted(base.Segmento.dropna().unique()), placeholder='Todos')
+with col_producto:
+    prods = st.multiselect('Producto', sorted(base.ProductoDetalle.dropna().unique()), placeholder='Todos')
+st.caption('Los controles están en la parte superior. Si dejas un filtro vacío, se incluyen todos sus valores.')
+st.divider()
 
 df=base.copy()
 if isinstance(date_range,(tuple,list)) and len(date_range)==2:
@@ -103,28 +113,115 @@ cols=st.columns(3)
 for c,label,value in zip(cols,['Ticket promedio','Clientes únicos','Transacciones'],[usd(ticket),f'{clientes_unicos:,}',f'{transacciones:,}']):c.metric(label,value)
 st.caption('Utilidad bruta = venta neta − costo total; margen = utilidad / venta neta; ticket = venta neta / VentaID únicos. Los clientes se cuentan por ClienteID distinto.')
 
-st.subheader('Evolución y rentabilidad')
-by_month=df.assign(Mes=df.Fecha.dt.to_period('M').dt.to_timestamp()).groupby('Mes',as_index=False).agg(Ventas=('VentaNeta','sum'),Utilidad=('UtilidadCalculada','sum'))
-by_month['Margen (%)']=by_month.Utilidad/by_month.Ventas.replace(0,float('nan'))*100
-left,right=st.columns([2,1])
-with left:st.plotly_chart(px.line(by_month,x='Mes',y=['Ventas','Utilidad'],markers=True,title='Ventas y utilidad por mes',labels={'value':'USD','variable':'Indicador'}),use_container_width=True)
-with right:st.plotly_chart(px.line(by_month,x='Mes',y='Margen (%)',markers=True,title='Margen bruto mensual'),use_container_width=True)
+# Paleta diversa, sobria y legible para un tablero ejecutivo.
+PALETA = ['#147D8C', '#E8A04B', '#6D63A8', '#D56F79', '#6C9C65', '#3981C6', '#B98748', '#8A6A9B']
+PLOT_TEMPLATE = 'plotly_white'
 
-st.subheader('Desempeño comercial')
-left,right=st.columns(2)
+def mostrar_grafico(fig, altura=370):
+    fig.update_layout(
+        template=PLOT_TEMPLATE, height=altura,
+        margin=dict(l=18, r=18, t=65, b=25),
+        font=dict(family='Arial', size=13, color='#24354A'),
+        title_font=dict(size=17, color='#24354A'),
+        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0),
+        paper_bgcolor='white', plot_bgcolor='white',
+    )
+    fig.update_xaxes(showgrid=True, gridcolor='#EAEFF4', zeroline=False)
+    fig.update_yaxes(showgrid=True, gridcolor='#EAEFF4', zeroline=False)
+    st.plotly_chart(fig, use_container_width=True)
+
+st.subheader('📈 Evolución y rentabilidad')
+by_month = df.assign(Mes=df.Fecha.dt.to_period('M').dt.to_timestamp()).groupby('Mes', as_index=False).agg(
+    Ventas=('VentaNeta', 'sum'), Utilidad=('UtilidadCalculada', 'sum'))
+by_month['Margen (%)'] = by_month.Utilidad / by_month.Ventas.replace(0, float('nan')) * 100
+left, right = st.columns([1.65, 1])
 with left:
-    city=df.groupby('Ciudad',as_index=False).VentaNeta.sum().sort_values('VentaNeta',ascending=False)
-    st.plotly_chart(px.bar(city,x='VentaNeta',y='Ciudad',orientation='h',title='Ventas por ciudad',labels={'VentaNeta':'Ventas (USD)'}),use_container_width=True)
+    # Serie temporal: líneas con dos colores para comparar ventas y utilidad.
+    fig = px.line(by_month, x='Mes', y=['Ventas', 'Utilidad'], markers=True,
+                  color_discrete_sequence=[PALETA[0], PALETA[1]],
+                  title='Tendencia mensual · ventas y utilidad',
+                  labels={'value': 'USD', 'variable': 'Indicador', 'Mes': 'Mes'})
+    fig.update_traces(line=dict(width=3), marker=dict(size=7))
+    mostrar_grafico(fig)
 with right:
-    branch=df.groupby('Sucursal',as_index=False).VentaNeta.sum().sort_values('VentaNeta',ascending=False).head(15)
-    st.plotly_chart(px.bar(branch,x='VentaNeta',y='Sucursal',orientation='h',title='Ventas por sucursal · Top 15',labels={'VentaNeta':'Ventas (USD)'}),use_container_width=True)
-left,right=st.columns(2)
+    # Área para comunicar la evolución del margen, distinta de las líneas anteriores.
+    fig = px.area(by_month, x='Mes', y='Margen (%)',
+                  color_discrete_sequence=[PALETA[2]],
+                  title='Evolución del margen bruto',
+                  labels={'Mes': 'Mes', 'Margen (%)': 'Margen (%)'})
+    fig.update_traces(line=dict(width=2))
+    mostrar_grafico(fig)
+
+st.subheader('🌎 Desempeño geográfico y comercial')
+left, right = st.columns(2)
 with left:
-    seg=df.groupby('Segmento',as_index=False).VentaNeta.sum().sort_values('VentaNeta',ascending=False)
-    st.plotly_chart(px.bar(seg,x='Segmento',y='VentaNeta',title='Ventas por segmento',labels={'VentaNeta':'Ventas (USD)'}),use_container_width=True)
+    city = df.groupby('Ciudad', as_index=False).VentaNeta.sum().sort_values('VentaNeta', ascending=False)
+    # Barras verticales con colores distintos por ciudad.
+    fig = px.bar(city, x='Ciudad', y='VentaNeta', color='Ciudad',
+                 color_discrete_sequence=PALETA, title='Facturación por ciudad',
+                 labels={'VentaNeta': 'Ventas (USD)', 'Ciudad': 'Ciudad'})
+    fig.update_layout(showlegend=False)
+    mostrar_grafico(fig)
 with right:
-    top=df.groupby('ProductoDetalle',as_index=False).agg(Unidades=('Cantidad','sum'),Ventas=('VentaNeta','sum'),Utilidad=('UtilidadCalculada','sum')).sort_values('Unidades',ascending=False).head(10)
-    st.plotly_chart(px.bar(top.sort_values('Unidades'),x='Unidades',y='ProductoDetalle',orientation='h',title='Top 10 productos por unidades'),use_container_width=True)
+    branch = df.groupby('Sucursal', as_index=False).VentaNeta.sum().sort_values('VentaNeta', ascending=False).head(12)
+    # Barras horizontales para que los nombres de sucursal sean legibles.
+    fig = px.bar(branch.sort_values('VentaNeta'), x='VentaNeta', y='Sucursal',
+                 orientation='h', color='VentaNeta', color_continuous_scale='Tealgrn',
+                 title='Sucursales con mayores ventas · Top 12',
+                 labels={'VentaNeta': 'Ventas (USD)', 'Sucursal': 'Sucursal'})
+    fig.update_layout(coloraxis_showscale=False)
+    mostrar_grafico(fig, 440)
+
+left, right = st.columns(2)
+with left:
+    seg = df.groupby('Segmento', as_index=False).VentaNeta.sum().sort_values('VentaNeta', ascending=False)
+    # Donut para participación por segmento; evitar demasiadas categorías.
+    if len(seg) <= 7:
+        fig = px.pie(seg, names='Segmento', values='VentaNeta', hole=0.58,
+                     color_discrete_sequence=PALETA, title='Participación de ventas por segmento')
+        fig.update_traces(textposition='inside', textinfo='percent',
+                          hovertemplate='%{label}<br>Ventas: $%{value:,.2f}<br>Participación: %{percent}<extra></extra>')
+    else:
+        fig = px.bar(seg, x='Segmento', y='VentaNeta', color='Segmento',
+                     color_discrete_sequence=PALETA, title='Ventas por segmento',
+                     labels={'VentaNeta': 'Ventas (USD)'})
+        fig.update_layout(showlegend=False)
+    mostrar_grafico(fig)
+with right:
+    top = df.groupby('ProductoDetalle', as_index=False).agg(
+        Unidades=('Cantidad', 'sum'), Ventas=('VentaNeta', 'sum'),
+        Utilidad=('UtilidadCalculada', 'sum')).sort_values('Unidades', ascending=False).head(10)
+    # Barras horizontales con gradiente por volumen.
+    fig = px.bar(top.sort_values('Unidades'), x='Unidades', y='ProductoDetalle',
+                 orientation='h', color='Unidades', color_continuous_scale='Sunset',
+                 title='Los 10 productos más vendidos · unidades',
+                 labels={'Unidades': 'Unidades vendidas', 'ProductoDetalle': 'Producto'})
+    fig.update_layout(coloraxis_showscale=False)
+    mostrar_grafico(fig, 440)
+
+st.subheader('🍕 Composición de ventas y rentabilidad')
+left, right = st.columns(2)
+with left:
+    category = df.groupby('Categoria', dropna=False, as_index=False).VentaNeta.sum().sort_values('VentaNeta', ascending=False)
+    category['Categoria'] = category['Categoria'].fillna('Sin categoría')
+    # Treemap: superficie proporcional a la venta por categoría.
+    fig = px.treemap(category, path=['Categoria'], values='VentaNeta',
+                     color='VentaNeta', color_continuous_scale='Teal',
+                     title='Distribución de ventas por categoría')
+    fig.update_layout(coloraxis_showscale=False)
+    mostrar_grafico(fig)
+with right:
+    # Dispersión: relación entre facturación y rentabilidad por producto.
+    rentabilidad = df.groupby('ProductoDetalle', as_index=False).agg(
+        Ventas=('VentaNeta', 'sum'), Utilidad=('UtilidadCalculada', 'sum'),
+        Unidades=('Cantidad', 'sum'))
+    rentabilidad['Margen (%)'] = rentabilidad.Utilidad / rentabilidad.Ventas.replace(0, float('nan')) * 100
+    fig = px.scatter(rentabilidad, x='Ventas', y='Margen (%)', size='Unidades',
+                     hover_name='ProductoDetalle', color='Margen (%)',
+                     color_continuous_scale='RdYlGn',
+                     title='Productos · ventas frente a margen bruto',
+                     labels={'Ventas': 'Ventas (USD)', 'Margen (%)': 'Margen bruto (%)'})
+    mostrar_grafico(fig)
 
 with st.expander('📊 Tabla de detalle y descarga'):
     detail=df[['VentaID','Fecha','Ciudad','Sucursal','ClienteID','Segmento','ProductoDetalle','Cantidad','VentaNeta','CostoTotal','UtilidadCalculada']].copy()
